@@ -32,9 +32,9 @@ if(!Array.isArray(state.done))state.done=[]; if(!Array.isArray(state.unlocked))s
 const E=id=>document.getElementById(id);
 function save(){localStorage.setItem(KEY,JSON.stringify(state));E("saveStatus").textContent="Sauvegardé localement • "+new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});}
 function log(type,msg,mission=cur+1){state.history.unshift({at:new Date().toISOString(),mission,type,msg});state.history=state.history.slice(0,200);save()}
-function isDone(i){return state.done.includes(i)} function isUnlocked(i){return i<10||state.unlocked.includes(i)}
-function prereqOK(i){return i===0||isDone(i-1)}
-function canOpen(i){return isUnlocked(i)&&prereqOK(i)}
+function isDone(i){return state.done.includes(i)} function isUnlocked(i){return true}
+function prereqOK(i){return true}
+function canOpen(i){return true}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function fmt(x){if(x===true)return"VRAI";if(x===false)return"FAUX";if(Number.isFinite(x))return String(Math.round(x*1000000)/1000000);return String(x)}
 function splitOutside(s,sep=","){let out=[],buf="",q=null,depth=0;for(let i=0;i<s.length;i++){let c=s[i];if(q){buf+=c;if(c===q&&s[i-1]!=="\\")q=null;continue}if(c==='"'||c==="'"){q=c;buf+=c;continue}if(c==="(")depth++;if(c===")")depth--;if(c===sep&&depth===0){out.push(buf.trim());buf="";}else buf+=c}if(buf.trim()||s.endsWith(sep))out.push(buf.trim());return out}
@@ -43,16 +43,30 @@ function evalExpr(src,v){let T=tokenize(src),p=0;const peek=()=>T[p],take=()=>T[
 function normalizeInput(x){if(typeof x==="boolean"||typeof x==="number")return x;let s=String(x??"").trim();if(/^(vrai|true)$/i.test(s))return true;if(/^(faux|false)$/i.test(s))return false;if(s!==""&&!isNaN(s.replace(",",".")))return Number(s.replace(",","."));return s}
 function readNames(code){let a=[];for(const line of code.split(/\n/)){let m=line.trim().match(/^LIRE\s+([A-Za-z_À-ÿ][\wÀ-ÿ]*)$/i);if(m&&!a.includes(m[1]))a.push(m[1])}return a}
 function execCode(code,input={}){let raw=code.split(/\n/),L=[];raw.forEach((x,idx)=>{let s=x.trim();if(s&&!/^\/\//.test(s)&&!(/^(DEBUT|FIN)$/i.test(s)))L.push({s,line:idx+1})});let v={},consts=new Set(),o=[],tr=[],steps=0;function go(a,b){for(let i=a;i<b;i++){if(++steps>1000)throw Error("Exécution interrompue : trop d'instructions.");let r=L[i].s,u=r.toUpperCase(),ln=L[i].line;if(/^SI\s+/i.test(r)){let c=r.replace(/^SI\s+/i,"").replace(/\s+ALORS$/i,"");let yes=Boolean(evalExpr(c,v)),d=1,el=-1,fi=-1;for(let j=i+1;j<b;j++){let z=L[j].s.toUpperCase();if(z.startsWith("SI "))d++;if(z==="FIN SI"){d--;if(!d){fi=j;break}}if(z==="SINON"&&d===1)el=j}if(fi<0)throw Error("Ligne "+ln+" : le SI n'a pas de FIN SI.");tr.push("L"+ln+" • "+r+" → "+(yes?"VRAI":"FAUX"));if(yes)go(i+1,el>=0?el:fi);else if(el>=0)go(el+1,fi);i=fi;continue}if(u==="SINON"||u==="FIN SI")continue;let rd=r.match(/^LIRE\s+([A-Za-z_À-ÿ][\wÀ-ÿ]*)$/i);if(rd){let n=rd[1];if(!(n in input))throw Error('Ligne '+ln+' : une valeur est attendue pour "'+n+'".');v[n]=normalizeInput(input[n]);tr.push("L"+ln+" • "+r+" → "+fmt(v[n]));continue}if(/^AFFICHER\s+/i.test(r)){let src=r.replace(/^AFFICHER\s+/i,""),parts=splitOutside(src),vals=parts.map(x=>evalExpr(x,v)),x=vals.map(fmt).join(" ");o.push(x);tr.push("L"+ln+" • "+r+" → "+x);continue}let m=r.match(/^(CONSTANTE\s+)?([A-Za-z_À-ÿ][\wÀ-ÿ]*)\s*(?:←|<-)\s*(.+)$/i);if(m){let isC=!!m[1],n=m[2];if(consts.has(n))throw Error('Ligne '+ln+' : la constante "'+n+'" ne peut pas être modifiée.');v[n]=evalExpr(m[3],v);if(isC)consts.add(n);tr.push("L"+ln+" • "+r+" → "+fmt(v[n]));continue}throw Error("Ligne "+ln+" : instruction non reconnue : "+r)}}try{go(0,L.length);return{o:o.join("\n"),v,tr}}catch(e){return{o:"ERREUR : "+e.message,v,tr,error:true}}}
-function list(){E("list").innerHTML="";M.forEach((m,i)=>{
-let b=document.createElement("button"),done=isDone(i),pre=prereqOK(i),unlocked=isUnlocked(i),stateName="";
-if(i===0){stateName=done?"done":"open"}
-else if(i<10){stateName=pre?(done?"done":"open"):"hardlocked"}
-else{stateName=(pre&&unlocked)?(done?"done":"open"):(pre&&!unlocked?"available":"hardlocked")}
-b.textContent=(i+1)+". "+m[1]+(stateName==="hardlocked"?"  🔒":stateName==="available"?"  🔑":"");
-b.className="m "+(i===cur&&stateName!=="hardlocked"?"on ":"")+(stateName==="done"?"done ":"")+(stateName==="available"?"available ":"")+(stateName==="hardlocked"?"locked ":"");
-if(stateName==="hardlocked"){b.disabled=true}else{b.onclick=()=>selectMission(i)}
-E("list").appendChild(b)});E("score").textContent=state.done.length+" / "+M.length}
-function selectMission(i){if(i>0&&!prereqOK(i))return;if(i>=10&&!isUnlocked(i)){openUnlock(i);return}load(i)}
+function list(){
+    E("list").innerHTML="";
+
+    M.forEach((m,i)=>{
+
+        let b=document.createElement("button");
+        let done=isDone(i);
+
+        b.textContent=(i+1)+". "+m[1];
+
+        b.className="m "
+            +(i===cur ? "on " : "")
+            +(done ? "done " : "");
+
+        b.onclick=()=>selectMission(i);
+
+        E("list").appendChild(b);
+    });
+
+    E("score").textContent=state.done.length+" / "+M.length;
+}
+function selectMission(i){
+    load(i)
+}
 function conceptFor(i){
 const C={
 0:["Nouvelle notion — AFFICHER",'Le texte se place entre guillemets : <code>AFFICHER "Bonjour"</code>.'],
